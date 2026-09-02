@@ -1,0 +1,5 @@
+{
+  "framework": null,
+  "buildCommand": "echo '--- pwd ---' && pwd && echo '--- ls . ---' && ls -a && echo '--- ls ../.. ---' && ls -a ../.. && echo '--- ls ../../commerce-common ---' && (ls ../../commerce-common || echo MISSING-commerce-common) && echo '--- ls ../../shopping-agent/skills ---' && (ls ../../shopping-agent/skills || echo MISSING-skills) && mkdir -p out && echo probe-ok > out/index.html",
+  "outputDirectory": "out"
+}
