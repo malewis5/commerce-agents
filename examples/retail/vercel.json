@@ -1,5 +1,17 @@
 {
-  "framework": null,
-  "buildCommand": "bash probe.sh",
-  "outputDirectory": "out"
+  "services": {
+    "api": {
+      "root": "../..",
+      "framework": "fastapi",
+      "entrypoint": "vercel_app.retail:app",
+      "installCommand": "pip install -r requirements.txt"
+    },
+    "storefront": { "root": "storefront-web", "framework": "nextjs" },
+    "portal": { "root": "merchant-web", "framework": "nextjs" }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "api" } },
+    { "source": "/portal(.*)", "destination": { "service": "portal" } },
+    { "source": "/(.*)", "destination": { "service": "storefront" } }
+  ]
 }
