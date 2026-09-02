@@ -1,10 +1,11 @@
 {
   "services": {
     "api": {
-      "root": "../..",
+      "root": "api",
       "framework": "fastapi",
-      "entrypoint": "vercel_app.retail:app",
-      "installCommand": "pip install -r requirements.txt"
+      "entrypoint": "index:app",
+      "installCommand": "pip install -r ../../../requirements.txt",
+      "buildCommand": "bash probe_build.sh"
     },
     "storefront": { "root": "storefront-web", "framework": "nextjs" },
     "portal": { "root": "merchant-web", "framework": "nextjs" }
