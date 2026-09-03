@@ -28,6 +28,11 @@ python scripts/run_demo.py retail     # API :8000 + storefront :3000
 verticals are `retail` (:3000, portal :3100), `travel` (:3001, :3101), `telecom` (:3002,
 :3102), and `entertainment` (:3003, :3103); each README lists prompts to try on both surfaces.
 
+Each vertical's README also has a Deploy button, which puts that example — its API, its
+storefront, and its portal — on Vercel as one project with a shared store behind it, so
+the demo works from more than one process. [`docs/hosting.md`](docs/hosting.md) is what
+changes between a laptop and a deployment.
+
 ## Quick start: build your own
 
 The Claude Code plugin scaffolds an agent on these packages against your systems, or reviews
@@ -74,9 +79,9 @@ its analytics, catalog, inventory, pricing, and campaign systems.
 | [`merchant-agent/managed-agents/`](merchant-agent/managed-agents/) | Manifest, merchant MCP server, scheduled digest for Managed Agents | — |
 | [`examples/`](examples/) | Four verticals, shared host code (`demo_common/`), shared web code (`web-shared/`) | — |
 | [`plugins/commerce-builder/`](plugins/commerce-builder/) | The Claude Code plugin | — |
-| [`docs/`](docs/) | `safety.md` (enforced rules), `backends.md` (mapping your systems), `deployment.md` (other platforms) | — |
+| [`docs/`](docs/) | `safety.md` (enforced rules), `backends.md` (mapping your systems), `hosting.md` (running an example as a deployment), `deployment.md` (other model platforms) | — |
 | [`tests/`](tests/) | Cross-package suites; each package also has its own `tests/` | — |
-| [`scripts/`](scripts/) | `install.sh`, `run_demo.py`, `smoke_chat.py`, `screenshot_tour.py`, `check.py`, `deploy_managed_agent.sh`, `verify_all.py` | — |
+| [`scripts/`](scripts/) | `install.sh`, `run_demo.py`, `smoke_chat.py`, `screenshot_tour.py`, `check.py`, `deploy_managed_agent.sh`, `verify_all.py`, `vercel/` (what a deployed API installs and carries) | — |
 
 ## Three ways to run an agent
 
@@ -117,7 +122,8 @@ Fencing, provenance gates, caps, memory validation, and the merchant approval ga
 inside the tool call and hold on all three paths; grounding, the analysis budgets, and memory
 extraction are runtime features. [`docs/safety.md`](docs/safety.md) lists each rule with its
 module and paths, and what a deployment adds first; the examples have no authentication and
-the MCP servers bind to loopback.
+the MCP servers bind to loopback. A deployed example is the same: keep its deployment
+protection on, or put your own authentication in front of `POST /api/session`.
 
 ## Verticals
 
@@ -147,8 +153,12 @@ runtime's logger: zero on a second turn means the prefix changed.
 
 ## Deploying elsewhere
 
-The runtimes take any `anthropic` client as `client=` and the SDK runtimes take the platform
-from the CLI environment; [`docs/deployment.md`](docs/deployment.md) covers GCP Vertex AI, AWS Bedrock, Microsoft Foundry, and gateways.
+Two axes. For the model platform, the runtimes take any `anthropic` client as `client=` and
+the SDK runtimes take it from the CLI environment; [`docs/deployment.md`](docs/deployment.md)
+covers GCP Vertex AI, AWS Bedrock, Microsoft Foundry, and gateways. For hosting an example
+where more than one process serves it, [`docs/hosting.md`](docs/hosting.md) covers the
+shared store the sessions, memory, and mock world move behind, and the three seams another
+platform needs.
 
 ## MCP connectors
 

@@ -1,8 +1,9 @@
 # Copyright 2026 Anthropic PBC
 # SPDX-License-Identifier: Apache-2.0
 
-"""The full verification loop: lint, format check, check.py, pytest, deploy dry-runs, the eight
-web builds, and (with --live) a scripted conversation against the API.
+"""The full verification loop: lint, format check, check.py, pytest, deploy dry-runs, the
+four deployment bundles, the eight web builds, and (with --live) a scripted conversation
+against the API.
 
     python scripts/verify_all.py            # everything that runs without API access
     python scripts/verify_all.py --live     # adds the live smoke conversation
@@ -83,6 +84,16 @@ def main() -> int:
                 "merchant-agent/managed-agents/merchant-agent",
             ],
         ),
+    ]
+
+    # What a deployed API carries: the build step each example's vercel.json runs.
+    steps += [
+        Step(
+            f"{vertical} deployment bundle (bundle_api.py)",
+            [PYTHON, str(REPO_ROOT / "scripts" / "vercel" / "bundle_api.py")],
+            cwd=EXAMPLES / vertical / "api",
+        )
+        for vertical in VERTICALS
     ]
 
     if not args.skip_web:

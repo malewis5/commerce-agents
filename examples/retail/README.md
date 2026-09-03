@@ -26,6 +26,18 @@ Chat needs `ANTHROPIC_API_KEY` in the repo-root `.env` or the environment; brows
 catalog and the portal's widgets do not. `MERCHANT_REQUIRE_HOST_APPROVAL=0` lets a chat
 approval apply a change; by default the preview card's button applies it.
 
+## Deploy
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fanthropics%2Fcommerce-agents%2Ftree%2Fmain%2Fexamples%2Fretail&repository-name=commerce-agents&project-name=acme-retail&env=ANTHROPIC_API_KEY&envDescription=Your%20Anthropic%20API%20key.%20Chat%20turns%20bill%20against%20it%3B%20browsing%20the%20catalog%20and%20the%20portal%27s%20widgets%20do%20not.&envLink=https%3A%2F%2Fplatform.claude.com%2Fsettings%2Fkeys&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22redis%22%7D%5D)
+
+One project: this example's API, its storefront at `/`, and its portal at `/portal`. The
+button asks for `ANTHROPIC_API_KEY` and offers to create the Redis store the deployment
+keeps its sessions, its memory, and this mock world in — a deployment runs more than one
+process, and all three have to be the same from any of them.
+[`docs/hosting.md`](../../docs/hosting.md) is what changes between a laptop and a
+deployment, and what to do on another platform. The routes have no authentication: leave
+the project's deployment protection on, or put your own in front of `POST /api/session`.
+
 ## Try
 
 Storefront (`scripts/smoke_chat.py --vertical retail` runs the same three turns):

@@ -96,6 +96,14 @@ def spawn_background(coro: Coroutine[Any, Any, object]) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
+def hosted() -> bool:
+    """Whether this process is a deployment's rather than a laptop's. Three things below
+    read it — the hosts the API answers to, whether work after a response runs, and where
+    the credential messages tell a reader to put the key — and each has its own variable
+    to say so outright where this guess is wrong."""
+    return bool(os.environ.get("VERCEL"))
+
+
 def background_outlives_response() -> bool:
     """Whether work started after a response is sent will actually run. A process that
     stays up (a local ``uvicorn``, a container) finishes it; a function the platform
@@ -104,7 +112,15 @@ def background_outlives_response() -> bool:
     stated = os.environ.get("COMMERCE_INLINE_BACKGROUND", "").strip()
     if stated:
         return stated == "0"
-    return not os.environ.get("VERCEL")
+    return not hosted()
+
+
+def credentials_hint(example_dir: str) -> str:
+    """Where a reader of a credential error should put the key. On a laptop that is a
+    file; on a deployment there is no file to edit, only the project's environment."""
+    if hosted():
+        return "this deployment's environment variables"
+    return f"examples/{example_dir}/.env or the repo-root .env"
 
 
 def _lifespan(on_startup: Sequence[Callable[[], Awaitable[None]]]):
@@ -140,7 +156,7 @@ def allowed_hosts() -> list[str]:
     listed = [host for host in named if host]
     if "*" in listed:
         return ["*"]
-    if not listed and os.environ.get("VERCEL"):
+    if not listed and hosted():
         return ["*"]
     return ["localhost", "127.0.0.1", *listed]
 
@@ -201,8 +217,9 @@ def stream_turn(
 ) -> StreamingResponse:
     """Stream one turn as SSE; the record is written back once the stream has ended (the
     request dependency wrote back before it began). Credential failures become a readable
-    error event naming ``env_hint`` (the example's ``.env`` path); anything else is logged
-    and reported generically. Memory extraction runs after the response has streamed."""
+    error event naming ``env_hint`` (where this deployment keeps its key); anything else is
+    logged and reported generically. Memory extraction runs after the response has streamed,
+    or inside it where nothing runs after one."""
 
     async def event_stream() -> AsyncIterator[str]:
         try:
@@ -215,9 +232,8 @@ def stream_turn(
             yield to_sse(
                 AgentEvent.error(
                     f"Anthropic API authentication failed (401). Check ANTHROPIC_API_KEY in "
-                    f"{env_hint} or the repo-root .env, unset any stale key exported by your "
-                    "shell, or restart with COMMERCE_DEMO_AUTH=sdk to use the SDK's own "
-                    "credential chain."
+                    f"{env_hint}, unset any stale key exported by your shell, or restart "
+                    "with COMMERCE_DEMO_AUTH=sdk to use the SDK's own credential chain."
                 )
             )
         except Exception as error:  # the client gets a safe event, the log gets the rest
@@ -227,8 +243,8 @@ def stream_turn(
                 yield to_sse(
                     AgentEvent.error(
                         "No Anthropic API credentials are configured, so chat can't run. Set "
-                        f"ANTHROPIC_API_KEY in {env_hint} or the repo-root .env and restart; "
-                        "everything except chat works without one."
+                        f"ANTHROPIC_API_KEY in {env_hint} and start again; everything except "
+                        "chat works without one."
                     )
                 )
             else:

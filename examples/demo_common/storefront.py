@@ -37,7 +37,7 @@ from shopping_agent.gates import OPTIONS_GATE, PROVENANCE_GATE
 from shopping_agent.serialization import cart_payload as serialize_cart
 from shopping_agent_runtime import ShoppingAgent
 
-from .host import DemoStorefront, append_user_turn, build_app, stream_turn
+from .host import DemoStorefront, append_user_turn, build_app, credentials_hint, stream_turn
 from .memory import MemoryFactEdit, MemorySeeder, install_memory_routes
 from .sessions import SessionRecord, SessionStore, session_dependency, session_store
 from .state import deployment_state_store
@@ -190,7 +190,7 @@ def build_storefront_host(
         title=title,
         backend=backend,
         agent=agent,
-        env_hint=f"examples/{example_root.name}/.env",
+        env_hint=credentials_hint(example_root.name),
         namespace=example_root.name,
         cart_extras=cart_extras,
         # Seed the memory fixtures when the app starts, inside its event loop.

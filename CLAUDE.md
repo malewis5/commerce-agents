@@ -13,10 +13,10 @@ paths each, four vertical examples, and a Claude Code plugin.
 - `*/runtime-messages-api/`: `ShoppingAgent`, `MerchantAgent`, the merchant analysis delegate.
 - `*/runtime-agent-sdk/`: each agent as `ClaudeAgentOptions`, with a console.
 - `*/managed-agents/`: the manifest directory (with the derived `system.md`) and the role's MCP server.
-- `examples/demo_common/` and `examples/web-shared/`: what the verticals' APIs and web apps share; `examples/` is the npm workspace.
-- `examples/<vertical>/`: `api/`, `data/`, `storefront-web/`, `merchant-web/`; ports 8000-8003, 3000-3003, 3100-3103.
+- `examples/demo_common/` and `examples/web-shared/`: what the verticals' APIs and web apps share; `examples/` is the npm workspace. `state.py` and `world.py` are the shared store a deployment keeps its state in.
+- `examples/<vertical>/`: `api/`, `data/`, `storefront-web/`, `merchant-web/`; ports 8000-8003, 3000-3003, 3100-3103. `vercel.json` and `api/index.py` deploy the three as one project.
 - `plugins/commerce-builder/`: six skills, four commands; `.claude-plugin/marketplace.json` points at it.
-- `docs/`: `safety.md`, `backends.md`, `deployment.md`. `scripts/`: install, demo, smoke, screenshots, check, deploy, verify.
+- `docs/`: `safety.md`, `backends.md`, `hosting.md`, `deployment.md`. `scripts/`: install, demo, smoke, screenshots, check, deploy, verify, `vercel/` (a deployed API's install and bundle steps).
 - `tests/`: the suites that span packages (both roles on all three paths); each package keeps its own `tests/`.
 
 `requirements.txt` installs the seven packages and their pinned dependencies (`requirements-dev.txt`
@@ -30,13 +30,15 @@ adds pytest and ruff); `scripts/install.sh` runs it.
 - Third-party content is fenced data; writes are provenance-gated and capped in code; `checkout` charges nothing; merchant writes apply only through host approval.
 - Core is domain-neutral; a vertical adds UI through `PresentationExtension` and keeps the rest to itself.
 - Each mechanism is defined once, in `commerce_common` or a role core, and shared by all three paths.
+- A demo's mutable state sits behind one seam (`StateStore`), so serving it from more than one process is configuration rather than a rewrite; with none configured the examples are one process, as before.
 
 ## Fictional and original
 
 No real company, brand, product, or person appears: the only company is ACME and its
 lines; every brand, prompt, schema, and figure is invented here. Two exceptions:
-deployment and integration targets (the README's "MCP connectors" section; platform and
-SDK names in `docs/deployment.md`, the README's deploying section, and the platform tests),
+deployment, hosting, and integration targets (the README's "MCP connectors" section;
+platform and SDK names in `docs/deployment.md`, `docs/hosting.md`, the READMEs' deploying
+sections, `examples/*/vercel.json`, and the platform tests),
 and CC0 category photos listed in the `IMAGE-CREDITS.md` beside them. When in doubt,
 redesign rather than rename.
 

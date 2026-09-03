@@ -46,7 +46,7 @@ from merchant_agent import (
 from merchant_agent.executor import MerchantToolExecutor
 from merchant_agent_runtime import MerchantAgent
 
-from .host import DemoStorefront, append_user_turn, stream_turn
+from .host import DemoStorefront, append_user_turn, credentials_hint, stream_turn
 from .memory import install_memory_routes
 from .sessions import SessionRecord, SessionStore, session_dependency, session_store
 from .world import DurableWorld
@@ -156,7 +156,7 @@ def build_merchant_router(
     async def chat(request: MerchantChatRequest, record: CurrentSession) -> StreamingResponse:
         append_user_turn(record, request.message, "Portal events")
         return stream_turn(
-            agent, sessions, record, context(record), env_hint=f"examples/{example_dir}/.env"
+            agent, sessions, record, context(record), env_hint=credentials_hint(example_dir)
         )
 
     @router.get("/overview")
