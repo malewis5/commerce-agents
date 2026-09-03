@@ -32,6 +32,10 @@ SKIP = shutil.ignore_patterns(
     "*.pyc",
     "tests",
     BUNDLE,
+    # The platform's own directory inside the service root, which holds the virtualenv
+    # this build just filled: the function already carries it, and copying it in would
+    # put a second one in the bundle.
+    ".vercel",
     ".next",
     "node_modules",
     ".env",
