@@ -11,7 +11,7 @@ fixture's ``dates_anchored_to``, so dated searches stay answerable after authori
 from __future__ import annotations
 
 import zlib
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ from demo_common.storefront_fixtures import (
     summary_of,
     within_price_and_rating,
 )
+from demo_common.world import WorldState, cart_lines_state, catalog_state, declared_once
 from shopping_agent import (
     Cart,
     FulfillmentOption,
@@ -342,6 +343,26 @@ class MockTravel(StorefrontBackend):
     def reset_session(self, session_id: str) -> None:
         self._carts.reset(session_id)
         self._trip_plans.pop(session_id, None)
+
+    @declared_once
+    def world_state(self) -> WorldState:
+        """What this mock holds that is not its fixtures: the session carts, the night
+        structure each session last planned, and the catalog fields an approved supplier
+        change moves."""
+
+        def dump_plans() -> dict[str, Any]:
+            return {session_id: asdict(plan) for session_id, plan in self._trip_plans.items()}
+
+        def load_plans(document: Any) -> None:
+            self._trip_plans.clear()
+            for session_id, entry in (document or {}).items():
+                self._trip_plans[session_id] = TripPlan(**entry)
+
+        state = WorldState()
+        cart_lines_state(state, self._carts)
+        state.part("trip_plans", dump=dump_plans, load=load_plans)
+        catalog_state(state, {**self.products, **self.variants})
+        return state
 
     # ------------------------------------------------------------------
     # Traveler, bookings, help content, fulfillment

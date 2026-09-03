@@ -38,6 +38,7 @@ from demo_common.merchant_fixtures import (
     staged_promotion_windows,
 )
 from demo_common.storefront_fixtures import load_json, refresh_family
+from demo_common.world import WorldState, declared_once, ledger_state
 from merchant_agent import (
     ActorKind,
     AlertCounts,
@@ -918,6 +919,20 @@ class MockTelecomMerchant(MerchantBackend):
         discarded = self.ledger.discard(change_id, actor=session.operator, actor_kind=actor_kind)
         self._promotion_windows.pop(change_id, None)
         return discarded
+
+    @declared_once
+    def world_state(self) -> WorldState:
+        """What this mock holds that is not its fixtures: the change ledger, the listing
+        rows and device stock an applied change moves, the promotion windows (applied, and
+        the pending ones' date ranges), and the campaigns."""
+        state = WorldState()
+        ledger_state(state, self.ledger)
+        state.container("listing_state", self._listing_state)
+        state.container("inventory", self._inventory)
+        state.container("promo_windows", self.promo_windows)
+        state.container("promotion_windows", self._promotion_windows)
+        state.models("campaigns", self._campaigns, Campaign)
+        return state
 
     def _apply_to_live_state(self, change: StagedChange) -> None:
         """Make an approved change visible in the shared consumer-facing state — a plan

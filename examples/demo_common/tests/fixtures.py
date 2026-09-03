@@ -32,9 +32,9 @@ def start_operator(client: TestClient) -> dict[str, str]:
     return {SESSION_HEADER: client.post("/api/merchant/session").json()["session_id"]}
 
 
-def session_record(main, headers: dict[str, str]):
+async def session_record(main, headers: dict[str, str]):
     """Returns the host's session record behind ``headers``."""
-    return main.host.sessions.require(headers[SESSION_HEADER])
+    return await main.host.sessions.require(headers[SESSION_HEADER])
 
 
 @pytest.fixture
@@ -44,13 +44,14 @@ def client(main) -> TestClient:
 
 @pytest.fixture
 def shopper(main, client):
-    """Returns ``start(*product_ids, user_id=...)``, the headers of a new session that has seen those products."""
+    """Returns ``await start(*product_ids, user_id=...)``, the headers of a new session
+    that has seen those products."""
 
-    def start(*seen: str, user_id: str = "demo-user") -> dict[str, str]:
+    async def start(*seen: str, user_id: str = "demo-user") -> dict[str, str]:
         headers = start_shopper(client, user_id)
-        record = session_record(main, headers)
+        record = await session_record(main, headers)
         record.state.remember_products([main.backend.product(pid) for pid in seen])
-        main.host.sessions.save(record)
+        await main.host.sessions.save(record)
         return headers
 
     return start

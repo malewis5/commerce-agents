@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from commerce_common.memory import MemoryStore
-from demo_common import REPO_ROOT, MerchantIdentity, build_merchant_router
+from demo_common import REPO_ROOT, DurableWorld, MerchantIdentity, build_merchant_router
 from merchant_agent_runtime import MerchantAgent
 
 from .agent_config import build_merchant_config
@@ -20,7 +20,9 @@ from .occupancy import build_occupancy_extension
 IDENTITY = MerchantIdentity(merchant_id="acme-travel", operator="Marta")
 
 
-def create_merchant_router(storefront: MockTravel, memory_store: MemoryStore) -> APIRouter:
+def create_merchant_router(
+    storefront: MockTravel, memory_store: MemoryStore, world: DurableWorld | None = None
+) -> APIRouter:
     config = build_merchant_config(storefront.store_name)
     merchant = MockTravelMerchant(storefront, config)
     agent = MerchantAgent(
@@ -36,6 +38,7 @@ def create_merchant_router(storefront: MockTravel, memory_store: MemoryStore) ->
         agent=agent,
         identity=IDENTITY,
         example_dir="travel",
+        world=world,
         overview_extras=lambda: {"today": merchant.today_snapshot()},
         portal_reads={"/occupancy": merchant.occupancy_overview},
     )

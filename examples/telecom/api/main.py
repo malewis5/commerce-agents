@@ -14,13 +14,14 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from commerce_common.memory import InMemoryMemoryStore
 from demo_common import (
     REPO_ROOT,
     CartAddRequest,
     MemorySeeder,
     build_storefront_host,
     load_demo_env,
+    memory_store_for,
+    seed_marker,
 )
 from shopping_agent_runtime import ShoppingAgent
 
@@ -36,7 +37,7 @@ agent = ShoppingAgent(
     backend=backend,
     skills_dir=REPO_ROOT / "shopping-agent" / "skills",
     config=build_shopping_config(),
-    memory_store=InMemoryMemoryStore(),
+    memory_store=memory_store_for(prefix="telecom:shopper"),
     extra_presentation_tools=[build_plan_matrix_extension()],
 )
 host = build_storefront_host(
@@ -44,10 +45,15 @@ host = build_storefront_host(
     example_root=DATA_DIR.parent,
     backend=backend,
     agent=agent,
-    memory_seeder=MemorySeeder(DATA_DIR / "memory-seed.json"),
+    memory_seeder=MemorySeeder(
+        DATA_DIR / "memory-seed.json", marker=seed_marker(None, prefix="telecom:shopper")
+    ),
 )
 app = host.app
-app.include_router(create_merchant_router(backend, InMemoryMemoryStore()), prefix="/api/merchant")
+app.include_router(
+    create_merchant_router(backend, memory_store_for(prefix="telecom:merchant"), world=host.world),
+    prefix="/api/merchant",
+)
 
 # Plans and home internet are contracts, so only these categories get a button that
 # skips the conversation and its disclosure step.

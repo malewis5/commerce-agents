@@ -35,6 +35,7 @@ from demo_common.storefront_fixtures import (
     summary_of,
     within_price_and_rating,
 )
+from demo_common.world import WorldState, catalog_state, declared_once
 from shopping_agent import (
     Cart,
     Disclosure,
@@ -371,6 +372,17 @@ class MockTicketing(StorefrontBackend):
     async def remove_from_cart(self, session: ShoppingSessionContext, product_id: str) -> Cart:
         self.engine.release_hold(session.session_id, product_id)
         return await self.get_cart(session)
+
+    @declared_once
+    def world_state(self) -> WorldState:
+        """What this mock holds that is not its fixtures: the engine's inventory,
+        holds, waitlists, offers, transfers, and wallets, plus the catalog fields an
+        approved promoter change moves. The cart is a view of the live holds, so it needs
+        no part of its own."""
+        state = WorldState()
+        state.part("engine", dump=self.engine.snapshot, load=self.engine.restore)
+        catalog_state(state, self.products)
+        return state
 
     def reset_session(self, session_id: str) -> None:
         self.engine.release_session(session_id)

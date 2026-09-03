@@ -764,12 +764,61 @@ def check_managed_custom_tool_descriptions() -> None:
             ok(f"{role.tree}: {len(custom)} custom tool descriptions match the registry")
 
 
+# The three services every example's vercel.json declares, and where each one's root is.
+DEPLOY_SERVICES = {"api": "api", "storefront": "storefront-web", "portal": "merchant-web"}
+DEPLOY_BUTTON = "https://vercel.com/new/clone?repository-url="
+
+
+def check_deployment_wiring() -> None:
+    """Each example deploys as one project of three services, and its README's button
+    points at that example. A vertical whose config, entrypoint, or button drifts would
+    deploy the wrong thing, or nothing."""
+    print("examples/*/vercel.json and the Deploy buttons")
+    for vertical in VERTICALS:
+        example = REPO_ROOT / "examples" / vertical
+        before = len(PROBLEMS)
+        try:
+            config = load_json(example / "vercel.json")
+        except Exception as error:
+            problem(f"examples/{vertical}/vercel.json: {error}")
+            continue
+        services = config.get("services", {})
+        for name, root in DEPLOY_SERVICES.items():
+            if services.get(name, {}).get("root") != root:
+                problem(f"examples/{vertical}/vercel.json: service {name} is not rooted at {root}")
+        sources = [rewrite.get("source") for rewrite in config.get("rewrites", [])]
+        if sources[:1] != ["/api/(.*)"] or sources[-1:] != ["/(.*)"]:
+            problem(
+                f"examples/{vertical}/vercel.json: rewrites must send /api first and "
+                f"catch all last, not {sources}"
+            )
+        if "/portal(.*)" not in sources:
+            problem(f"examples/{vertical}/vercel.json: no rewrite sends /portal to the portal")
+
+        entrypoint = example / "api" / "index.py"
+        if not entrypoint.exists():
+            problem(f"examples/{vertical}/api/index.py: missing (vercel.json names index:app)")
+        elif f"from {vertical}.api.main import app" not in entrypoint.read_text(encoding="utf-8"):
+            problem(f"examples/{vertical}/api/index.py: does not import {vertical}.api.main")
+
+        readme = (example / "README.md").read_text(encoding="utf-8")
+        target = f"examples%2F{vertical}&"
+        if DEPLOY_BUTTON not in readme:
+            problem(f"examples/{vertical}/README.md: no Deploy button")
+        elif target not in readme:
+            problem(f"examples/{vertical}/README.md: the Deploy button does not point at {target}")
+
+        if len(PROBLEMS) == before:
+            ok(f"{vertical}: three services, an entrypoint, and a button of its own")
+
+
 CHECKS = (
     check_skills,
     check_storefront_fixtures,
     check_ticketing_fixtures,
     check_merchant_fixtures,
     check_verification_wiring,
+    check_deployment_wiring,
     check_package_versions,
     check_manifests,
     check_managed_system_prompts,

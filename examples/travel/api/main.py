@@ -9,8 +9,14 @@ with the ``present_itinerary`` extension, and the supplier router under /api/mer
 
 from __future__ import annotations
 
-from commerce_common.memory import InMemoryMemoryStore
-from demo_common import REPO_ROOT, MemorySeeder, build_storefront_host, load_demo_env
+from demo_common import (
+    REPO_ROOT,
+    MemorySeeder,
+    build_storefront_host,
+    load_demo_env,
+    memory_store_for,
+    seed_marker,
+)
 from shopping_agent_runtime import ShoppingAgent
 
 from .agent_config import build_shopping_config
@@ -25,7 +31,7 @@ agent = ShoppingAgent(
     backend=backend,
     skills_dir=REPO_ROOT / "shopping-agent" / "skills",
     config=build_shopping_config(),
-    memory_store=InMemoryMemoryStore(),
+    memory_store=memory_store_for(prefix="travel:shopper"),
     extra_presentation_tools=[build_itinerary_extension()],
 )
 host = build_storefront_host(
@@ -33,7 +39,12 @@ host = build_storefront_host(
     example_root=DATA_DIR.parent,
     backend=backend,
     agent=agent,
-    memory_seeder=MemorySeeder(DATA_DIR / "memory-seed.json"),
+    memory_seeder=MemorySeeder(
+        DATA_DIR / "memory-seed.json", marker=seed_marker(None, prefix="travel:shopper")
+    ),
 )
 app = host.app
-app.include_router(create_merchant_router(backend, InMemoryMemoryStore()), prefix="/api/merchant")
+app.include_router(
+    create_merchant_router(backend, memory_store_for(prefix="travel:merchant"), world=host.world),
+    prefix="/api/merchant",
+)

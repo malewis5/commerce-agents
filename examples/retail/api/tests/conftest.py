@@ -60,3 +60,15 @@ def relevance_probe() -> tuple[str, str, str, set[str]]:
 @pytest.fixture(scope="session")
 def showcase_stamps() -> set[str]:
     return {"low_stock"}
+
+
+@pytest.fixture
+def peer_backends(merchant):
+    """The pair of backends a second process of the same deployment starts with: the same
+    fixtures, none of this process's state."""
+
+    def build():
+        storefront = MockRetail()
+        return storefront, MockRetailMerchant(storefront, merchant.config)
+
+    return build

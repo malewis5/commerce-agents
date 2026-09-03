@@ -25,7 +25,6 @@ from __future__ import annotations
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-from commerce_common.memory import InMemoryMemoryStore
 from demo_common import (
     REPO_ROOT,
     CartAddRequest,
@@ -33,6 +32,8 @@ from demo_common import (
     SessionRecord,
     build_storefront_host,
     load_demo_env,
+    memory_store_for,
+    seed_marker,
 )
 from shopping_agent.fencing import STOREFRONT_FENCE
 from shopping_agent_runtime import ShoppingAgent
@@ -59,7 +60,7 @@ agent = ShoppingAgent(
     backend=backend,
     skills_dir=REPO_ROOT / "shopping-agent" / "skills",
     config=build_shopping_config(),
-    memory_store=InMemoryMemoryStore(),
+    memory_store=memory_store_for(prefix="entertainment:shopper"),
     extra_presentation_tools=[build_venue_map_extension(), build_hold_view_extension()],
     executor_class=TicketingToolExecutor,
 )
@@ -82,13 +83,14 @@ def holds_payload(record: SessionRecord) -> dict:
     }
 
 
-def deliver_notifications() -> None:
+async def deliver_notifications() -> None:
     """Queue the engine's proactive notices (a return offer, an expiry) on every live
     session of the user they concern; the next turn hands them to the agent."""
     for note in engine.collect_notifications():
-        for record in host.sessions.sessions_for_user(note.user_id):
+        for record in await host.sessions.sessions_for_user(note.user_id):
             record.pending_app_events.append(note.text)
-            host.sessions.save(record)  # outside a request, so nothing else writes it back
+            # Outside a request, so nothing else writes it back.
+            await host.sessions.save(record)
 
 
 host = build_storefront_host(
@@ -96,13 +98,20 @@ host = build_storefront_host(
     example_root=DATA_DIR.parent,
     backend=backend,
     agent=agent,
-    memory_seeder=MemorySeeder(DATA_DIR / "memory-seed.json"),
+    memory_seeder=MemorySeeder(
+        DATA_DIR / "memory-seed.json", marker=seed_marker(None, prefix="entertainment:shopper")
+    ),
     product_of=backend.get_live_product,
     cart_extras=holds_payload,
     before_turn=deliver_notifications,
 )
 app = host.app
-app.include_router(create_merchant_router(backend, InMemoryMemoryStore()), prefix="/api/merchant")
+app.include_router(
+    create_merchant_router(
+        backend, memory_store_for(prefix="entertainment:merchant"), world=host.world
+    ),
+    prefix="/api/merchant",
+)
 
 _STATUS_OF_ERROR = ((OwnershipError, 403), (NotFoundError, 404), (StateError, 409))
 
@@ -240,7 +249,7 @@ async def demo_return(request: DemoReturnRequest) -> dict:
         engine.record_return(request.product_id, request.quantity)
     except TicketingError as error:
         raise http_error(error) from error
-    deliver_notifications()
+    await deliver_notifications()
     return {"ok": True, "remaining": engine.remaining(request.product_id)}
 
 

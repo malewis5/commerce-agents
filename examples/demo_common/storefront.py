@@ -37,10 +37,12 @@ from shopping_agent.gates import OPTIONS_GATE, PROVENANCE_GATE
 from shopping_agent.serialization import cart_payload as serialize_cart
 from shopping_agent_runtime import ShoppingAgent
 
-from .host import DemoStorefront, append_user_turn, build_app, stream_turn
+from .host import DemoStorefront, append_user_turn, build_app, credentials_hint, stream_turn
 from .memory import MemoryFactEdit, MemorySeeder, install_memory_routes
-from .sessions import SessionRecord, SessionStore, session_dependency
+from .sessions import SessionRecord, SessionStore, session_dependency, session_store
+from .state import deployment_state_store
 from .storefront_fixtures import SUMMARY_EXCLUDES
+from .world import DurableWorld, WorldMiddleware
 
 StorefrontRecord = SessionRecord[ShoppingSessionState]
 
@@ -83,6 +85,7 @@ class StorefrontHost:
         backend: DemoStorefront,
         agent: ShoppingAgent,
         env_hint: str,
+        vertical: str,
         cart_extras: Callable[[StorefrontRecord], dict[str, Any]] | None,
         on_startup: Sequence[Callable[[], Awaitable[None]]] = (),
     ) -> None:
@@ -90,7 +93,15 @@ class StorefrontHost:
         self.backend = backend
         self.agent = agent
         self.memory_store = cast(MemoryStore, agent.memory.store)
-        self.sessions: SessionStore[ShoppingSessionState] = SessionStore(ShoppingSessionState)
+        self.sessions: SessionStore[ShoppingSessionState] = session_store(
+            ShoppingSessionState, prefix=f"{vertical}:shopper"
+        )
+        # The mock world both roles of this process share. The merchant router folds its
+        # own backend in (``build_merchant_router``), so one document carries the catalog
+        # the portal moves and the cart the storefront shows.
+        self.world = DurableWorld(deployment_state_store(), f"{vertical}:world")
+        self.world.include(backend, prefix="storefront")
+        self.app.add_middleware(WorldMiddleware, world=self.world)
         # The parameter annotation a vertical's own routes use: ``record: host.CurrentSession``.
         self.CurrentSession = session_dependency(self.sessions, "/api/session")
         self._env_hint = env_hint
@@ -169,7 +180,7 @@ def build_storefront_host(
     product_of: Callable[[str], ProductDetails | None] | None = None,
     product_detail: Callable[[ProductDetails], dict[str, Any]] | None = None,
     cart_extras: Callable[[StorefrontRecord], dict[str, Any]] | None = None,
-    before_turn: Callable[[], None] | None = None,
+    before_turn: Callable[[], Any] | None = None,
 ) -> StorefrontHost:
     """Seed memory, then build the app with the shared routes. ``product_of`` and
     ``product_detail`` let a vertical stamp live state onto catalog reads or enrich the
@@ -179,7 +190,8 @@ def build_storefront_host(
         title=title,
         backend=backend,
         agent=agent,
-        env_hint=f"examples/{example_root.name}/.env",
+        env_hint=credentials_hint(example_root.name),
+        vertical=example_root.name,
         cart_extras=cart_extras,
         # Seed the memory fixtures when the app starts, inside its event loop.
         on_startup=[lambda: memory_seeder.seed_at_boot(cast(MemoryStore, agent.memory.store))],
@@ -191,7 +203,7 @@ def build_storefront_host(
 
     @app.post("/api/session")
     async def start_session(request: StartSessionRequest | None = None) -> dict:
-        record = host.sessions.start((request or StartSessionRequest()).user_id)
+        record = await host.sessions.start((request or StartSessionRequest()).user_id)
         profile = await backend.get_preferences(host.context(record))
         return {
             "session_id": record.session_id,
@@ -260,9 +272,9 @@ def build_storefront_host(
             await host.memory_store.clear(record.user_id)
             if request.clear_memory and not request.purge_memory:
                 await memory_seeder.reseed(host.memory_store, record.user_id)
-        host.sessions.reset(record)
+        await host.sessions.reset(record)
         backend.reset_session(record.session_id)
-        fresh = host.sessions.start(record.user_id)
+        fresh = await host.sessions.start(record.user_id)
         return {"ok": True, "session_id": fresh.session_id}
 
     @app.get("/api/health")
@@ -273,6 +285,10 @@ def build_storefront_host(
             "products": len(backend.products),
             "skills": agent.skills.names,
             "model": agent.config.model,
+            # Whether this process shares its state with the rest of its deployment. A
+            # local run says false and is one process; a deployment saying false is one
+            # whose store is not wired, which is worth seeing before a demo.
+            "shared_state": host.world.enabled,
         }
 
     return host

@@ -4,15 +4,20 @@
 """The ticketing state machine: timed holds behind the cart, ``remaining()`` derived from
 capacity, sales, holds, and offer reservations, FIFO waitlists whose return offers roll on
 expiry, and reversible transfers. Nothing here charges anything. Expiry is swept lazily at
-the top of every public method, so tests drive it through the injected clock."""
+the top of every public method, so tests drive it through the injected clock.
+
+All of it is state rather than fixture: a hold is created by one request and released,
+claimed, or expired by another. ``snapshot`` and ``restore`` are what a deployment running
+more than one process carries between them (``demo_common/world.py``); a local run, which
+is one process, never calls them."""
 
 from __future__ import annotations
 
 import hashlib
-import itertools
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any, TypeVar
 
 HOLD_TTL_S = 480
 OFFER_CLAIM_WINDOW_S = 600
@@ -20,6 +25,9 @@ MAX_TICKETS_PER_EVENT = 8  # held tickets per event per session
 BARCODE_ROTATION_S = 60
 # Once a real fan queues behind them, seeded fans leave the line one per interval.
 SIM_FAN_DEPART_INTERVAL_S = 20
+
+
+RecordT = TypeVar("RecordT")
 
 
 class TicketingError(ValueError):
@@ -116,6 +124,23 @@ class Notification:
     text: str
 
 
+def _dumped(record: Any) -> dict[str, Any]:
+    """One of the dataclasses above as JSON, with its timestamps as ISO strings."""
+    return {
+        name: value.isoformat() if isinstance(value, datetime) else value
+        for name, value in asdict(record).items()
+    }
+
+
+def _loaded(kind: type[RecordT], entry: Mapping[str, Any], *stamps: str) -> RecordT:
+    """The inverse, told which of the fields are timestamps."""
+    values = dict(entry)
+    for stamp in stamps:
+        if values.get(stamp) is not None:
+            values[stamp] = datetime.fromisoformat(values[stamp])
+    return kind(**values)
+
+
 class TicketingEngine:
     """The inventory and reservation state behind ``MockTicketing``."""
 
@@ -152,11 +177,63 @@ class TicketingEngine:
         self._offers: dict[str, ReturnOffer] = {}
         self._transfers: dict[str, Transfer] = {}
         self._tickets: dict[str, Ticket] = {t.ticket_id: t for t in tickets}
-        self._counter = itertools.count(1)
+        self._sequence = 0
         self._pending_notifications: list[Notification] = []
 
     def _next_id(self, prefix: str) -> str:
-        return f"{prefix}-{next(self._counter):04d}"
+        self._sequence += 1
+        return f"{prefix}-{self._sequence:04d}"
+
+    # ------------------------------------------------------------------
+    # Carrying the state between processes
+    # ------------------------------------------------------------------
+
+    def snapshot(self) -> dict[str, Any]:
+        """Everything the engine holds, as JSON. The sequence travels with it, so a
+        restored engine never reissues a hold, offer, or transfer id."""
+        return {
+            "rows": {pid: asdict(row) for pid, row in self._rows.items()},
+            "holds": {hold_id: _dumped(hold) for hold_id, hold in self._holds.items()},
+            "waitlists": {
+                pid: [_dumped(entry) for entry in entries]
+                for pid, entries in self._waitlists.items()
+            },
+            "offers": {offer_id: _dumped(offer) for offer_id, offer in self._offers.items()},
+            "transfers": {key: _dumped(transfer) for key, transfer in self._transfers.items()},
+            "tickets": {key: asdict(ticket) for key, ticket in self._tickets.items()},
+            "notifications": [asdict(note) for note in self._pending_notifications],
+            "sequence": self._sequence,
+        }
+
+    def restore(self, document: Mapping[str, Any]) -> None:
+        """Replace the engine's state with a snapshot: the whole picture, not a patch over
+        what this process happened to have."""
+        self._rows = {
+            pid: _InventoryRow(**row) for pid, row in (document.get("rows") or {}).items()
+        }
+        self._holds = {
+            hold_id: _loaded(Hold, entry, "expires_at")
+            for hold_id, entry in (document.get("holds") or {}).items()
+        }
+        self._waitlists = {
+            pid: [_loaded(WaitlistEntry, entry, "joined_at", "departs_at") for entry in entries]
+            for pid, entries in (document.get("waitlists") or {}).items()
+        }
+        self._offers = {
+            offer_id: _loaded(ReturnOffer, entry, "expires_at")
+            for offer_id, entry in (document.get("offers") or {}).items()
+        }
+        self._transfers = {
+            key: _loaded(Transfer, entry, "initiated_at")
+            for key, entry in (document.get("transfers") or {}).items()
+        }
+        self._tickets = {
+            key: Ticket(**entry) for key, entry in (document.get("tickets") or {}).items()
+        }
+        self._pending_notifications = [
+            Notification(**entry) for entry in document.get("notifications") or []
+        ]
+        self._sequence = int(document.get("sequence", 0))
 
     def now(self) -> datetime:
         """The engine's clock, which tests replace; every countdown reads it here."""
