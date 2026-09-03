@@ -6,7 +6,7 @@
  * in its globals.css, a merchant portal imports `portal/portal.css`.
  */
 
-export { AgentApi } from "./api";
+export { AgentApi, apiRoot } from "./api";
 export { useCatalogIndex } from "./catalog";
 export { type Prefill } from "./Composer";
 export * from "./format";

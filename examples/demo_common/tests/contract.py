@@ -5,6 +5,7 @@
 
 import asyncio
 import inspect
+import json
 import re
 from collections.abc import Iterable
 from datetime import date, timedelta
@@ -24,6 +25,7 @@ from demo_common import (
 )
 from demo_common.storefront_fixtures import load_catalog, load_json
 from demo_common.tests.fixtures import showcase_products, start_operator, start_shopper
+from demo_common.world import WorldState
 from merchant_agent import (
     ActorKind,
     CampaignDraft,
@@ -162,10 +164,10 @@ def test_every_scoped_route_refuses_a_missing_or_unknown_token(main, client):
             assert client.request(method, path, json={}, headers=made_up).status_code == 401
 
 
-def test_storefront_session_binds_the_profile_and_reset_reissues_it(main, client):
+async def test_storefront_session_binds_the_profile_and_reset_reissues_it(main, client):
     started = client.post("/api/session", json={"user_id": "demo-user-2"}).json()
     assert started["user_id"] == "demo-user-2" and started["name"]
-    assert main.host.sessions.require(started["session_id"]).user_id == "demo-user-2"
+    assert (await main.host.sessions.require(started["session_id"])).user_id == "demo-user-2"
     assert client.post("/api/session", json={}).json()["user_id"] == "demo-user"
     assert (
         client.post("/api/session").json()["user_id"] == "demo-user"
@@ -176,7 +178,7 @@ def test_storefront_session_binds_the_profile_and_reset_reissues_it(main, client
     assert client.post("/api/reset", json={}, headers=theirs).status_code == 200
     fresh = client.post("/api/reset", json={}, headers=mine).json()["session_id"]
     assert client.get("/api/cart", headers=mine).status_code == 401
-    assert main.host.sessions.require(fresh).user_id == "demo-user"
+    assert (await main.host.sessions.require(fresh)).user_id == "demo-user"
 
 
 def test_merchant_session_binds_the_server_held_identity(portal):
@@ -367,7 +369,7 @@ def test_overview_and_alerts_carry_the_portal_keys(portal):
     }
 
 
-def test_preview_card_buttons_report_a_hold_apart_from_an_apply(
+async def test_preview_card_buttons_report_a_hold_apart_from_an_apply(
     backend, merchant, merchant_identity, operator_session
 ):
     """A held call answers ok=false with the reason; only an applied change queues an app event."""
@@ -390,8 +392,8 @@ def test_preview_card_buttons_report_a_hold_apart_from_an_apply(
     )
     sessions = inspect.getclosurevars(_dependency_of(apply_route)).nonlocals["store"]
 
-    def stored():
-        return sessions.require(headers[SESSION_HEADER])
+    async def stored():
+        return await sessions.require(headers[SESSION_HEADER])
 
     held = client.post("/api/merchant/changes/chg-none/apply", headers=headers)
     assert held.status_code == 200
@@ -400,28 +402,26 @@ def test_preview_card_buttons_report_a_hold_apart_from_an_apply(
     assert "chg-none was not staged or listed in this session" in body["reason"]
     dismissed = client.post("/api/merchant/changes/chg-none/discard", headers=headers).json()
     assert dismissed["ok"] is False and "nothing to discard" in dismissed["reason"]
-    record = stored()
+    record = await stored()
     assert record.pending_app_events == []
     assert not record.state.approved_change_ids and not record.state.host_action_change_ids
 
     listing = merchant.all_listings()[0]
-    staged = asyncio.run(
-        merchant.stage_price_update(
-            operator_session,
-            [PriceUpdateItem(listing_id=listing.listing_id, new_price=listing.price)],
-        )
+    staged = await merchant.stage_price_update(
+        operator_session,
+        [PriceUpdateItem(listing_id=listing.listing_id, new_price=listing.price)],
     )
     record.state.remember_change(staged)
-    sessions.save(record)
+    await sessions.save(record)
     applied = client.post(f"/api/merchant/changes/{staged.change_id}/apply", headers=headers).json()
     assert applied["ok"] is True and applied["change"]["status"] == "applied"
-    record = stored()
+    record = await stored()
     assert record.pending_app_events == [
         f"Operator approved and applied change {staged.change_id} from the preview card."
     ]
     assert not record.state.approved_change_ids
     again = client.post(f"/api/merchant/changes/{staged.change_id}/apply", headers=headers)
-    assert again.status_code == 400 and len(stored().pending_app_events) == 1
+    assert again.status_code == 400 and len((await stored()).pending_app_events) == 1
 
 
 def test_orders_route_lists_the_callers_own_orders_newest_first(client):
@@ -675,3 +675,51 @@ async def test_two_staged_restocks_both_count_when_applied(
     await merchant.apply_change(operator_session, first.change_id)
     await merchant.apply_change(operator_session, second.change_id)
     assert (await merchant.get_listing(operator_session, restockable_listing)).stock == before + 6
+
+
+# -- the world document ---------------------------------------------------------------
+
+
+async def test_the_world_document_carries_this_demos_edits_to_another_process(
+    backend, merchant, peer_backends, operator_session, session, cart_product
+):
+    """What a demo does — a cart line, an applied change, a moved price — reaches a second
+    process of the same deployment through the world document, and nothing else does:
+    a listing nobody touched is still at its fixture value there."""
+    world = WorldState()
+    world.include(backend.world_state(), prefix="storefront")
+    world.include(merchant.world_state(), prefix="merchant")
+
+    await backend.add_to_cart(session, cart_product, 1)
+    listing = merchant.all_listings()[0]
+    staged = await merchant.stage_price_update(
+        operator_session, [PriceUpdateItem(listing_id=listing.listing_id, new_price=listing.price)]
+    )
+    await merchant.apply_change(operator_session, staged.change_id)
+    # Fields an approved change moves, set on the catalog record here so the assertion is
+    # about the document rather than about this vertical's pricing guardrails.
+    edited = backend.products[listing.listing_id]
+    edited.price = round(edited.price + 5, 2)
+    edited.attributes["promotion"] = "Carried by the world document"
+
+    document = json.loads(json.dumps(world.snapshot()))  # the round trip a store makes
+
+    peer_storefront, peer_merchant = peer_backends()
+    peer_world = WorldState()
+    peer_world.include(peer_storefront.world_state(), prefix="storefront")
+    peer_world.include(peer_merchant.world_state(), prefix="merchant")
+    untouched = next(
+        product_id for product_id in peer_storefront.products if product_id != listing.listing_id
+    )
+    fixture_price = peer_storefront.products[untouched].price
+    peer_world.restore(document)
+
+    assert (await peer_storefront.get_cart(session)).items == (
+        await backend.get_cart(session)
+    ).items
+    peer_listing = peer_storefront.products[listing.listing_id]
+    assert peer_listing.price == edited.price
+    assert peer_listing.attributes["promotion"] == "Carried by the world document"
+    assert peer_storefront.products[untouched].price == fixture_price
+    applied = [change.change_id for change in peer_merchant.ledger.applied()]
+    assert applied == [staged.change_id]

@@ -13,10 +13,10 @@ from retail.api import main
 def add(client, shopper):
     """Returns ``add(product_id, *seen) -> (response, session record)``."""
 
-    def _add(product_id: str, *seen: str):
-        headers = shopper(*seen)
+    async def _add(product_id: str, *seen: str):
+        headers = await shopper(*seen)
         body = {"product_id": product_id, "quantity": 1}
-        return client.post("/api/cart/add", json=body, headers=headers), session_record(
+        return client.post("/api/cart/add", json=body, headers=headers), await session_record(
             main, headers
         )
 
@@ -46,15 +46,15 @@ def test_the_detail_route_resolves_a_family_and_a_variant(client):
     assert variant["price_intelligence"] and variant["review_aspects"]
 
 
-def test_the_add_button_on_a_family_is_held_with_the_route_to_a_variant(add):
-    response, record = add("AR-1902", "AR-1902")
+async def test_the_add_button_on_a_family_is_held_with_the_route_to_a_variant(add):
+    response, record = await add("AR-1902", "AR-1902")
     assert response.status_code == 400
     assert "options" in response.json()["detail"]
     assert record.pending_app_events == []
 
 
-def test_the_add_button_on_a_seen_variant_writes_a_line_with_its_choice(add):
-    response, record = add("AR-1902-KING", "AR-1902", "AR-1902-KING")
+async def test_the_add_button_on_a_seen_variant_writes_a_line_with_its_choice(add):
+    response, record = await add("AR-1902-KING", "AR-1902", "AR-1902-KING")
     assert response.status_code == 200
     [line] = response.json()["cart"]["items"]
     assert line["product_id"] == "AR-1902-KING"
@@ -62,8 +62,8 @@ def test_the_add_button_on_a_seen_variant_writes_a_line_with_its_choice(add):
     assert "AR-1902-KING" in record.pending_app_events[0]
 
 
-def test_a_sold_out_variant_is_refused_with_its_in_stock_siblings_named(add):
-    response, record = add("AR-1902-FULL", "AR-1902", "AR-1902-FULL")
+async def test_a_sold_out_variant_is_refused_with_its_in_stock_siblings_named(add):
+    response, record = await add("AR-1902-FULL", "AR-1902", "AR-1902-FULL")
     assert response.status_code == 400
     detail = response.json()["detail"]
     assert "AR-1902-FULL is out of stock" in detail and "AR-1902-QUEEN" in detail

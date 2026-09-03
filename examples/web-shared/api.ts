@@ -143,3 +143,18 @@ async function* readEventStream(body: ReadableStream<Uint8Array>): AsyncGenerato
     }
   }
 }
+
+/**
+ * Where this app's requests go.
+ *
+ * `NEXT_PUBLIC_API_URL` wins: `run_demo.py` sets it to the port the API came up on, and a
+ * deployment whose API is on another origin sets it too. With nothing set, a build on a
+ * platform that serves this app and the API from one deployment (the `/api` routes of the
+ * same origin) uses relative URLs, and a local build falls back to the vertical's port.
+ * The API's own origin is what an asset path is resolved against, so both must agree.
+ */
+export function apiRoot(localPort: number): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured) return configured;
+  return process.env.NEXT_PUBLIC_VERCEL_ENV ? "" : `http://localhost:${localPort}`;
+}

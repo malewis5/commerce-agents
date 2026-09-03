@@ -1,7 +1,7 @@
 // Copyright 2026 Anthropic PBC
 // SPDX-License-Identifier: Apache-2.0
 
-import { AgentApi } from "web-shared";
+import { AgentApi, apiRoot } from "web-shared";
 import type {
   AlertsResponse,
   ListingDetailResponse,
@@ -10,7 +10,7 @@ import type {
   OverviewResponse,
 } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
+const API_URL = apiRoot(8001);
 
 export const api = new AgentApi(API_URL, "/api/merchant");
 

@@ -14,13 +14,15 @@ from __future__ import annotations
 
 from fastapi.staticfiles import StaticFiles
 
-from commerce_common.memory import InMemoryMemoryStore, JsonFileMemoryStore
 from demo_common import (
     REPO_ROOT,
     CartAddRequest,
     MemorySeeder,
     build_storefront_host,
+    json_file_memory_store,
     load_demo_env,
+    memory_store_for,
+    seed_marker,
 )
 from shopping_agent import ProductDetails
 from shopping_agent_runtime import ShoppingAgent
@@ -37,7 +39,10 @@ agent = ShoppingAgent(
     backend=backend,
     skills_dir=REPO_ROOT / "shopping-agent" / "skills",
     config=build_shopping_config(),
-    memory_store=JsonFileMemoryStore(DATA_DIR / ".memory-store.json"),
+    memory_store=memory_store_for(
+        prefix="retail:shopper",
+        local=json_file_memory_store(DATA_DIR / ".memory-store.json"),
+    ),
 )
 
 
@@ -55,12 +60,16 @@ host = build_storefront_host(
     backend=backend,
     agent=agent,
     memory_seeder=MemorySeeder(
-        DATA_DIR / "memory-seed.json", marker=DATA_DIR / ".memory-seeded.json"
+        DATA_DIR / "memory-seed.json",
+        marker=seed_marker(DATA_DIR / ".memory-seeded.json", prefix="retail:shopper"),
     ),
     product_detail=product_detail,
 )
 app = host.app
-app.include_router(create_merchant_router(backend, InMemoryMemoryStore()), prefix="/api/merchant")
+app.include_router(
+    create_merchant_router(backend, memory_store_for(prefix="retail:merchant"), world=host.world),
+    prefix="/api/merchant",
+)
 # The merchant portal shows the storefront's listing photos, so the API serves them to both apps.
 app.mount("/products", StaticFiles(directory=PRODUCT_IMAGES, check_dir=False), name="products")
 

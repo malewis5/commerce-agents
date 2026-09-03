@@ -36,6 +36,7 @@ from demo_common.storefront_fixtures import (
     unavailable_detail,
     within_price_and_rating,
 )
+from demo_common.world import WorldState, cart_lines_state, catalog_state, declared_once
 from shopping_agent import (
     Cart,
     Disclosure,
@@ -265,6 +266,15 @@ class MockTelecom(StorefrontBackend):
 
     def reset_session(self, session_id: str) -> None:
         self._carts.reset(session_id)
+
+    @declared_once
+    def world_state(self) -> WorldState:
+        """What this mock holds that is not its fixtures: the session orders in progress,
+        and the catalog fields an approved commercial-ops change moves."""
+        state = WorldState()
+        cart_lines_state(state, self._carts)
+        catalog_state(state, {**self.products, **self.variants})
+        return state
 
     # ------------------------------------------------------------------
     # Customer, account, orders, help content, fulfillment

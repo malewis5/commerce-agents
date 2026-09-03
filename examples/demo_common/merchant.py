@@ -48,7 +48,8 @@ from merchant_agent_runtime import MerchantAgent
 
 from .host import DemoStorefront, append_user_turn, stream_turn
 from .memory import install_memory_routes
-from .sessions import SessionRecord, SessionStore, session_dependency
+from .sessions import SessionRecord, SessionStore, session_dependency, session_store
+from .world import DurableWorld
 
 MerchantRecord = SessionRecord[MerchantSessionState]
 
@@ -116,15 +117,22 @@ def build_merchant_router(
     agent: MerchantAgent,
     identity: MerchantIdentity,
     example_dir: str,
+    world: DurableWorld | None = None,
     overview_extras: Callable[[], dict[str, Any]] | None = None,
     portal_reads: Mapping[str, Callable[[], Any]] | None = None,
 ) -> APIRouter:
     """The router above, over an agent the vertical has already constructed.
     ``overview_extras`` supplies the vertical's own home-page keys on ``/overview``;
-    ``portal_reads`` maps a path to a callable (sync or async) served as a scoped GET."""
+    ``portal_reads`` maps a path to a callable (sync or async) served as a scoped GET;
+    ``world`` is the storefront host's world document, which this backend's staged
+    changes and inventory overlay join so both roles of a deployment read one world."""
     memory_store = cast(MemoryStore, agent.memory.store)
-    sessions: SessionStore[MerchantSessionState] = SessionStore(MerchantSessionState)
+    sessions: SessionStore[MerchantSessionState] = session_store(
+        MerchantSessionState, prefix=f"{example_dir}:merchant"
+    )
     CurrentSession = session_dependency(sessions, "/api/merchant/session")
+    if world is not None:
+        world.include(backend, prefix="merchant")
     router = APIRouter()
 
     def context(record: MerchantRecord) -> MerchantSessionContext:
@@ -137,7 +145,7 @@ def build_merchant_router(
 
     @router.post("/session")
     async def start_session() -> dict:
-        record = sessions.start(identity.merchant_id)
+        record = await sessions.start(identity.merchant_id)
         return {
             "session_id": record.session_id,
             "merchant_id": identity.merchant_id,
@@ -290,8 +298,8 @@ def build_merchant_router(
     async def reset(request: MerchantResetRequest, record: CurrentSession) -> dict:
         if request.purge_memory:
             await memory_store.clear(record.user_id)
-        sessions.reset(record)
-        fresh = sessions.start(record.user_id)
+        await sessions.reset(record)
+        fresh = await sessions.start(record.user_id)
         return {"ok": True, "session_id": fresh.session_id}
 
     @router.get("/health")
@@ -303,6 +311,7 @@ def build_merchant_router(
             "listings": len(storefront.products),
             "skills": agent.skills.names,
             "model": agent.config.model,
+            "shared_state": world.enabled if world is not None else False,
         }
 
     return router

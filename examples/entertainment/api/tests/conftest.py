@@ -103,3 +103,16 @@ def showcase_stamps() -> set[str]:
         "vs_box_office",
         "box_office_all_in_usd",
     }
+
+
+@pytest.fixture
+def peer_backends(clock, merchant):
+    """The pair of backends a second process of the same deployment starts with: the same
+    fixtures, none of this process's state. It reads the same clock, so a restored hold is
+    measured against the same now()."""
+
+    def build():
+        storefront = MockTicketing(now=clock)
+        return storefront, MockTicketingMerchant(storefront, merchant.config)
+
+    return build

@@ -61,3 +61,15 @@ def cart_product() -> str:
 def relevance_probe() -> tuple[str, str, str, set[str]]:
     """Query, non-relevance sort, the product it must lead with, one-token matches it must omit."""
     return ("prepaid plan", "rating", "AM-PLAN-105", {"AM-PLAN-103", "AM-PLAN-104"})
+
+
+@pytest.fixture
+def peer_backends(merchant):
+    """The pair of backends a second process of the same deployment starts with: the same
+    fixtures, none of this process's state."""
+
+    def build():
+        storefront = MockTelecom()
+        return storefront, MockTelecomMerchant(storefront, merchant.config)
+
+    return build

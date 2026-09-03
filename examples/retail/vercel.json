@@ -1,0 +1,51 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "api": {
+      "root": "api",
+      "framework": "fastapi",
+      "entrypoint": "index:app",
+      "installCommand": "bash ../../../scripts/vercel/install-api.sh",
+      "buildCommand": "python3 ../../../scripts/vercel/bundle_api.py",
+      "functions": {
+        "index.py": {
+          "maxDuration": 300
+        }
+      }
+    },
+    "storefront": {
+      "root": "storefront-web",
+      "framework": "nextjs"
+    },
+    "portal": {
+      "root": "merchant-web",
+      "framework": "nextjs"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/products/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/portal(.*)",
+      "destination": {
+        "service": "portal"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "storefront"
+      }
+    }
+  ]
+}

@@ -35,6 +35,7 @@ from demo_common.merchant_fixtures import (
     stage_campaign,
 )
 from demo_common.storefront_fixtures import load_json, refresh_family
+from demo_common.world import WorldState, declared_once, ledger_state
 from merchant_agent import (
     ActorKind,
     AlertCounts,
@@ -734,6 +735,17 @@ class MockRetailMerchant(MerchantBackend):
         actor_kind: ActorKind = ActorKind.OPERATOR,
     ) -> StagedChange:
         return self.ledger.discard(change_id, actor=session.operator, actor_kind=actor_kind)
+
+    @declared_once
+    def world_state(self) -> WorldState:
+        """What this mock holds that is not its fixtures: the change ledger, the
+        inventory overlay an applied restock or pause moves, and the campaigns a budget
+        change edits."""
+        state = WorldState()
+        ledger_state(state, self.ledger)
+        state.container("inventory", self._inventory)
+        state.models("campaigns", self._campaigns, Campaign)
+        return state
 
     def _apply_to_live_state(self, change: StagedChange) -> None:
         """Write an applied change through to the shared catalog. An applied promotion is

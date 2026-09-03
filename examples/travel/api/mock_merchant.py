@@ -28,6 +28,7 @@ from demo_common.merchant_fixtures import (
     staged_promotion_windows,
 )
 from demo_common.storefront_fixtures import find_by_id, load_json
+from demo_common.world import WorldState, declared_once, ledger_state
 from merchant_agent import (
     ActorKind,
     AlertCounts,
@@ -770,6 +771,19 @@ class MockTravelMerchant(MerchantBackend):
         # A discarded promotion will never apply, so its date window has nothing left to do.
         self._promotion_windows.pop(change_id, None)
         return discarded
+
+    @declared_once
+    def world_state(self) -> WorldState:
+        """What this mock holds that is not its fixtures: the change ledger, the listing
+        rows an applied release or pause moves, the rate overrides an applied promotion
+        records, the date windows of promotions still pending, and the campaigns."""
+        state = WorldState()
+        ledger_state(state, self.ledger)
+        state.container("listing_state", self._listing_state)
+        state.container("rate_overrides", self.rate_overrides)
+        state.container("promotion_windows", self._promotion_windows)
+        state.models("campaigns", self._campaigns, Campaign)
+        return state
 
     def _apply_to_live_state(self, change: StagedChange) -> None:
         """Make an approved change visible in the shared traveler-facing state."""

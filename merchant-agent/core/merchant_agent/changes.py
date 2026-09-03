@@ -7,7 +7,9 @@ build on. Guardrails run when a change is staged and again before it is applied.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from commerce_common.fencing import truncate_display
 
@@ -127,12 +129,36 @@ class ChangeLedger:
     """In-memory staged-change lifecycle a MerchantBackend can build on. ``stage`` checks
     the guardrails and records the actor; ``apply`` and ``discard`` accept only changes
     that are currently staged; applied and discarded changes stay in the ledger as the
-    audit trail."""
+    audit trail.
+
+    A change is staged by one request and approved by another, so a deployment running
+    more than one process cannot leave the ledger in one of them. ``snapshot`` and
+    ``restore`` are the seam for that: a shared store carries the document, or the host
+    writes the changes to its own table and builds the ledger from it."""
 
     def __init__(self, config: MerchantAgentConfig):
         self._config = config
         self._changes: dict[str, StagedChange] = {}
         self._sequence = 0
+
+    def snapshot(self) -> dict[str, Any]:
+        """The ledger as JSON: the changes it holds and the sequence the next change id
+        comes from, so a restored ledger never reissues an id."""
+        return {
+            "sequence": self._sequence,
+            "changes": [change.model_dump(mode="json") for change in self._changes.values()],
+        }
+
+    def restore(self, document: Mapping[str, Any]) -> None:
+        """Replace the ledger's contents with a snapshot. The config stays this process's
+        own, so a change staged under looser guardrails is still re-checked on apply."""
+        self._changes = {
+            change.change_id: change
+            for change in (
+                StagedChange.model_validate(entry) for entry in document.get("changes", [])
+            )
+        }
+        self._sequence = int(document.get("sequence", 0))
 
     def stage(
         self,

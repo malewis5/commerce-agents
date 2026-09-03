@@ -16,20 +16,27 @@ request appends its new messages to. The dependency writes the record back when 
 request ends; a streamed turn writes back when its stream ends (``stream_turn`` in
 ``host.py``); code holding a record outside a request calls ``save`` itself. A write whose
 version is behind the store's is refused, so two requests racing on one session cannot
-overwrite each other. ``SessionStore`` keeps both parts in memory; a deployment subclasses
-it and puts the storage methods at the bottom over its own store.
+overwrite each other. ``SessionStore`` keeps both parts in memory; ``DurableSessionStore``
+puts the same six storage methods on a ``StateStore``, which is what a deployment running
+more than one process needs and what ``session_store`` returns when the environment names
+a store.
+
+Every method is async because a shared store is a network call: nothing on a request path
+of a streaming API may block the loop.
 """
 
 from __future__ import annotations
 
 import copy
 import secrets
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Generic, TypeVar
 
 from fastapi import Depends, Header, HTTPException
 from pydantic import BaseModel
+
+from .state import SESSION_TTL_S, StateConflict, StateStore, deployment_state_store
 
 SESSION_HEADER = "X-Session-Id"
 
@@ -75,19 +82,19 @@ class SessionStore(Generic[StateT]):
         self._states: dict[str, tuple[int, dict[str, Any]]] = {}
         self._transcripts: dict[str, list[dict[str, Any]]] = {}
 
-    def start(self, user_id: str) -> SessionRecord[StateT]:
-        record = SessionRecord(
+    async def start(self, user_id: str) -> SessionRecord[StateT]:
+        record: SessionRecord[StateT] = SessionRecord(
             session_id=secrets.token_urlsafe(24), user_id=user_id, state=self._state_type()
         )
-        self.save(record)
+        await self.save(record)
         return record
 
-    def require(self, session_id: str) -> SessionRecord[StateT]:
-        stored = self.read_state(session_id)
+    async def require(self, session_id: str) -> SessionRecord[StateT]:
+        stored = await self.read_state(session_id)
         if stored is None:
             raise UnknownSessionError(session_id)
         version, document = stored
-        messages = self.read_messages(session_id)
+        messages = await self.read_messages(session_id)
         return SessionRecord(
             session_id=session_id,
             user_id=document["user_id"],
@@ -99,7 +106,7 @@ class SessionStore(Generic[StateT]):
             stored_messages=len(messages),
         )
 
-    def save(self, record: SessionRecord[StateT]) -> None:
+    async def save(self, record: SessionRecord[StateT]) -> None:
         """The state document first, under the version check, whenever it changed or the
         transcript grew, so a request that lost a race writes nothing at all; then the
         messages the store lacks."""
@@ -108,27 +115,30 @@ class SessionStore(Generic[StateT]):
         document = record.state_document()
         grew = record.stored_messages < len(record.messages)
         if document != record.stored_state or grew:
-            self.write_state(record.session_id, document, record.version)
+            await self.write_state(record.session_id, document, record.version)
             record.version += 1
             record.stored_state = document
         if grew:
             new = record.messages[record.stored_messages :]
-            self.write_messages(record.session_id, new, record.stored_messages)
+            await self.write_messages(record.session_id, new, record.stored_messages)
             record.stored_messages = len(record.messages)
 
-    def reset(self, record: SessionRecord[StateT]) -> None:
+    async def reset(self, record: SessionRecord[StateT]) -> None:
         record.ended = True
-        self.delete(record.session_id)
+        await self.delete(record.session_id)
 
-    def sessions_for_user(self, user_id: str) -> list[SessionRecord[StateT]]:
-        return [self.require(session_id) for session_id in self.session_ids_for_user(user_id)]
+    async def sessions_for_user(self, user_id: str) -> list[SessionRecord[StateT]]:
+        return [
+            await self.require(session_id)
+            for session_id in await self.session_ids_for_user(user_id)
+        ]
 
     # -- Storage: the six methods a deployment puts over its own store.
 
-    def read_state(self, session_id: str) -> tuple[int, dict[str, Any]] | None:
+    async def read_state(self, session_id: str) -> tuple[int, dict[str, Any]] | None:
         return self._states.get(session_id)
 
-    def write_state(self, session_id: str, document: dict[str, Any], version: int) -> None:
+    async def write_state(self, session_id: str, document: dict[str, Any], version: int) -> None:
         """Store ``document`` as ``version + 1`` if the stored version is still ``version``
         (0 while a session is being started): a compare-and-set in a shared store."""
         current = self._states.get(session_id)
@@ -138,24 +148,112 @@ class SessionStore(Generic[StateT]):
 
     # Copied both ways, as a real store would: a record's later edits reach the store only
     # through save.
-    def read_messages(self, session_id: str) -> list[dict[str, Any]]:
+    async def read_messages(self, session_id: str) -> list[dict[str, Any]]:
         return copy.deepcopy(self._transcripts.get(session_id, []))
 
-    def write_messages(self, session_id: str, messages: list[dict[str, Any]], start: int) -> None:
+    async def write_messages(
+        self, session_id: str, messages: list[dict[str, Any]], start: int
+    ) -> None:
         """Replace the transcript from ``start`` on: an append when ``start`` is its stored
         length, the whole transcript after a turn compacted it."""
         self._transcripts.setdefault(session_id, [])[start:] = copy.deepcopy(messages)
 
-    def delete(self, session_id: str) -> None:
+    async def delete(self, session_id: str) -> None:
         self._states.pop(session_id, None)
         self._transcripts.pop(session_id, None)
 
-    def session_ids_for_user(self, user_id: str) -> list[str]:
+    async def session_ids_for_user(self, user_id: str) -> list[str]:
         return [
             session_id
             for session_id, (_, document) in self._states.items()
             if document["user_id"] == user_id
         ]
+
+
+class DurableSessionStore(SessionStore[StateT]):
+    """The six storage methods on a ``StateStore``: the state document is a versioned
+    document, the transcript an appendable list, and each user's live session ids a member
+    set (which ``sessions_for_user`` reads, for the server-side events a vertical delivers
+    to a session that is not the caller's). Keys carry a role prefix, so the two roles of
+    one deployment cannot resolve each other's session ids, and everything expires, so a
+    demo left running does not keep transcripts forever."""
+
+    def __init__(
+        self,
+        state_type: type[StateT],
+        store: StateStore,
+        *,
+        prefix: str,
+        ttl_s: int = SESSION_TTL_S,
+    ) -> None:
+        super().__init__(state_type)
+        self._store = store
+        self._prefix = prefix.rstrip(":")
+        self._ttl_s = ttl_s
+
+    def _document_key(self, session_id: str) -> str:
+        return f"{self._prefix}:session:{session_id}"
+
+    def _messages_key(self, session_id: str) -> str:
+        return f"{self._prefix}:session:{session_id}:messages"
+
+    def _user_key(self, user_id: str) -> str:
+        return f"{self._prefix}:user:{user_id}:sessions"
+
+    async def read_state(self, session_id: str) -> tuple[int, dict[str, Any]] | None:
+        return await self._store.read_document(self._document_key(session_id))
+
+    async def write_state(self, session_id: str, document: dict[str, Any], version: int) -> None:
+        try:
+            await self._store.write_document(
+                self._document_key(session_id), document, version, ttl_s=self._ttl_s
+            )
+        except StateConflict as conflict:
+            raise SessionConflictError(session_id) from conflict
+        if version == 0:
+            # The user index is written after the session exists, so it never names one
+            # that a lost race did not create.
+            await self._store.add_member(
+                self._user_key(document["user_id"]), session_id, ttl_s=self._ttl_s
+            )
+
+    async def read_messages(self, session_id: str) -> list[dict[str, Any]]:
+        return await self._store.read_list(self._messages_key(session_id))
+
+    async def write_messages(
+        self, session_id: str, messages: list[dict[str, Any]], start: int
+    ) -> None:
+        await self._store.write_list(
+            self._messages_key(session_id), messages, start, ttl_s=self._ttl_s
+        )
+
+    async def delete(self, session_id: str) -> None:
+        stored = await self._store.read_document(self._document_key(session_id))
+        if stored is not None:
+            await self._store.remove_member(self._user_key(stored[1]["user_id"]), session_id)
+        await self._store.delete(self._document_key(session_id), self._messages_key(session_id))
+
+    async def session_ids_for_user(self, user_id: str) -> list[str]:
+        ids = await self._store.read_members(self._user_key(user_id))
+        # An id whose session has expired stays in the set until something reads it.
+        live = []
+        for session_id in ids:
+            if await self._store.read_document(self._document_key(session_id)) is not None:
+                live.append(session_id)
+            else:
+                await self._store.remove_member(self._user_key(user_id), session_id)
+        return live
+
+
+def session_store(
+    state_type: type[StateT], *, prefix: str, store: StateStore | None = None
+) -> SessionStore[StateT]:
+    """The store for one role: the deployment's shared one when the environment names it
+    (``state.py``), the per-process one otherwise."""
+    resolved = store if store is not None else deployment_state_store()
+    if resolved is None:
+        return SessionStore(state_type)
+    return DurableSessionStore(state_type, resolved, prefix=prefix)
 
 
 def session_dependency(store: SessionStore[StateT], start_route: str) -> Any:
@@ -165,20 +263,20 @@ def session_dependency(store: SessionStore[StateT], start_route: str) -> Any:
     ``start_route`` names the login route in the 401 detail; a write that another request
     beat is a 409."""
 
-    def current_session(
+    async def current_session(
         session_id: Annotated[str | None, Header(alias=SESSION_HEADER)] = None,
-    ) -> Iterator[SessionRecord[StateT]]:
+    ) -> AsyncIterator[SessionRecord[StateT]]:
         if not session_id:
             raise HTTPException(
                 status_code=401, detail=f"Start a session first (POST {start_route})"
             )
         try:
-            record = store.require(session_id)
+            record = await store.require(session_id)
         except UnknownSessionError as error:
             raise HTTPException(status_code=401, detail="Unknown session") from error
         yield record
         try:
-            store.save(record)
+            await store.save(record)
         except SessionConflictError as error:
             raise HTTPException(status_code=409, detail="The session changed; retry") from error
 

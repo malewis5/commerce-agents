@@ -17,6 +17,11 @@ htmlcov/
 .env.*
 !.env.example
 
+# Deployment build output: the slice of the repository a deployed example API carries
+# (scripts/vercel/bundle_api.py) and the platform CLI's own directory.
+examples/*/api/_deploy/
+.vercel/
+
 # Node / Next.js (vertical example frontends)
 node_modules/
 .next/

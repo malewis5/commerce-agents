@@ -8,6 +8,7 @@ filters; what is here is the part that must rank the same way in every vertical.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, date, datetime, timedelta
@@ -98,7 +99,13 @@ _VARIANT_INHERITS = (
 
 
 def example_data_dir(api_module_file: str) -> Path:
-    """An example's ``data/`` directory, given the ``__file__`` of a module in its ``api/``."""
+    """An example's ``data/`` directory, given the ``__file__`` of a module in its
+    ``api/``, or the copy ``COMMERCE_DATA_DIR`` names — a deployment that bundles only
+    the slice of the repository its API needs puts the fixtures where the function can
+    read them."""
+    override = os.environ.get("COMMERCE_DATA_DIR")
+    if override:
+        return Path(override)
     return Path(api_module_file).resolve().parent.parent / "data"
 
 
@@ -436,6 +443,11 @@ class SessionCarts:
 
     def lines(self, session_id: str) -> dict[str, CartItem]:
         return self._lines.setdefault(session_id, {})
+
+    def lines_by_session(self) -> dict[str, dict[str, CartItem]]:
+        """Every session's lines, for a mock's ``world_state`` to declare: a cart is
+        state a deployment shares between its processes, not fixture data."""
+        return self._lines
 
     def cart(self, session_id: str) -> Cart:
         return Cart(items=list(self.lines(session_id).values()))
