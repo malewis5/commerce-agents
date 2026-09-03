@@ -70,8 +70,12 @@ app.include_router(
     create_merchant_router(backend, memory_store_for(prefix="retail:merchant"), world=host.world),
     prefix="/api/merchant",
 )
-# The merchant portal shows the storefront's listing photos, so the API serves them to both apps.
-app.mount("/products", StaticFiles(directory=PRODUCT_IMAGES, check_dir=False), name="products")
+# The merchant portal shows the storefront's listing photos. Locally the API is the one
+# thing both web apps can reach, so it serves them; a deployment puts both apps and the
+# API on one origin, where the photos are already served from the storefront's own
+# public/ directory and this mount has nothing to do.
+if PRODUCT_IMAGES.is_dir():
+    app.mount("/products", StaticFiles(directory=PRODUCT_IMAGES), name="products")
 
 
 @app.post("/api/cart/add")

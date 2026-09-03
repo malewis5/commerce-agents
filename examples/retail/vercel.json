@@ -30,12 +30,6 @@
       }
     },
     {
-      "source": "/products/(.*)",
-      "destination": {
-        "service": "api"
-      }
-    },
-    {
       "source": "/portal(.*)",
       "destination": {
         "service": "portal"

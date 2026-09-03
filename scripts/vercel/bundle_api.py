@@ -4,12 +4,12 @@
 """The build command of a deployed example API (``examples/<vertical>/vercel.json``).
 
 A platform bundles a service's own directory into its function, and nothing above it. The
-API's directory is ``examples/<vertical>/api/``, but the process needs four things that
-live elsewhere in the repository: the shared host code, the vertical's fixtures, both
-roles' skill files, and (retail) the listing photos the portal shows. This copies that
-slice into ``api/_deploy/``, keeping the repository's own layout so every path the code
-already computes resolves inside it; ``api/index.py`` points ``COMMERCE_REPO_ROOT`` and
-``COMMERCE_DATA_DIR`` at the copy and imports the app.
+API's directory is ``examples/<vertical>/api/``, but the process needs three things that
+live elsewhere in the repository: the shared host code, the vertical's fixtures, and both
+roles' skill files. This copies that slice into ``api/_deploy/``, keeping the
+repository's own layout so every path the code already computes resolves inside it;
+``api/index.py`` points ``COMMERCE_REPO_ROOT`` and ``COMMERCE_DATA_DIR`` at the copy and
+imports the app.
 
     python3 ../../../scripts/vercel/bundle_api.py     # from examples/<vertical>/api
 
@@ -78,11 +78,6 @@ def main(api_dir: Path) -> int:
     # verticals compute them with (``REPO_ROOT / "<role>-agent" / "skills"``).
     for role in ("shopping-agent", "merchant-agent"):
         copy(REPO_ROOT / role / "skills", bundle / role / "skills")
-
-    # The listing photos the merchant portal reads through the API. Only retail has them.
-    photos = example / "storefront-web" / "public" / "products"
-    if photos.is_dir():
-        copy(photos, bundle / "examples" / vertical / "storefront-web" / "public" / "products")
 
     total = sum(path.stat().st_size for path in bundle.rglob("*") if path.is_file())
     print(f"bundle_api: {vertical} bundle is {total / 1024:.0f} KiB")
