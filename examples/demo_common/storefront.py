@@ -85,7 +85,7 @@ class StorefrontHost:
         backend: DemoStorefront,
         agent: ShoppingAgent,
         env_hint: str,
-        namespace: str,
+        vertical: str,
         cart_extras: Callable[[StorefrontRecord], dict[str, Any]] | None,
         on_startup: Sequence[Callable[[], Awaitable[None]]] = (),
     ) -> None:
@@ -94,12 +94,12 @@ class StorefrontHost:
         self.agent = agent
         self.memory_store = cast(MemoryStore, agent.memory.store)
         self.sessions: SessionStore[ShoppingSessionState] = session_store(
-            ShoppingSessionState, prefix=f"{namespace}:shopper"
+            ShoppingSessionState, prefix=f"{vertical}:shopper"
         )
         # The mock world both roles of this process share. The merchant router folds its
         # own backend in (``build_merchant_router``), so one document carries the catalog
         # the portal moves and the cart the storefront shows.
-        self.world = DurableWorld(deployment_state_store(namespace), f"{namespace}:world")
+        self.world = DurableWorld(deployment_state_store(), f"{vertical}:world")
         self.world.include(backend, prefix="storefront")
         self.app.add_middleware(WorldMiddleware, world=self.world)
         # The parameter annotation a vertical's own routes use: ``record: host.CurrentSession``.
@@ -191,7 +191,7 @@ def build_storefront_host(
         backend=backend,
         agent=agent,
         env_hint=credentials_hint(example_root.name),
-        namespace=example_root.name,
+        vertical=example_root.name,
         cart_extras=cart_extras,
         # Seed the memory fixtures when the app starts, inside its event loop.
         on_startup=[lambda: memory_seeder.seed_at_boot(cast(MemoryStore, agent.memory.store))],

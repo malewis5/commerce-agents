@@ -184,7 +184,7 @@ async def test_the_environment_decides_which_store_a_deployment_gets(monkeypatch
     reset_state_store()
     monkeypatch.setenv("KV_REST_API_URL", "https://example.upstash.io")
     monkeypatch.setenv("KV_REST_API_TOKEN", "token")
-    assert isinstance(deployment_state_store("retail"), RedisStateStore)
+    assert isinstance(deployment_state_store(), RedisStateStore)
 
     reset_state_store()
     monkeypatch.setenv("COMMERCE_STATE_STORE", "none")

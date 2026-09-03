@@ -395,11 +395,13 @@ _store: StateStore | None = None
 _resolved = False
 
 
-def state_namespace(default: str = "commerce") -> str:
-    return os.environ.get("COMMERCE_STATE_NAMESPACE") or default
+def state_namespace() -> str:
+    """The prefix every key carries, so two deployments can share one store. Each key
+    names its vertical and role after it (``commerce:retail:shopper:session:…``)."""
+    return os.environ.get("COMMERCE_STATE_NAMESPACE") or "commerce"
 
 
-def deployment_state_store(namespace: str = "commerce") -> StateStore | None:
+def deployment_state_store() -> StateStore | None:
     """The store this process shares with the rest of its deployment, or ``None`` when the
     environment names none — a local run, which keeps its state in memory as before. The
     answer is computed once: every role of one process gets the same store."""
@@ -407,7 +409,7 @@ def deployment_state_store(namespace: str = "commerce") -> StateStore | None:
     if _resolved:
         return _store
     _resolved = True
-    _store = _build_state_store(namespace)
+    _store = _build_state_store()
     return _store
 
 
@@ -417,7 +419,7 @@ def reset_state_store() -> None:
     _store, _resolved = None, False
 
 
-def _build_state_store(namespace: str) -> StateStore | None:
+def _build_state_store() -> StateStore | None:
     choice = os.environ.get("COMMERCE_STATE_STORE", "").strip().lower()
     if choice == "none":
         return None
@@ -428,5 +430,5 @@ def _build_state_store(namespace: str) -> StateStore | None:
         url, token = os.environ.get(url_variable), os.environ.get(token_variable)
         if url and token:
             logger.info("state: Redis over HTTP from %s", url_variable)
-            return RedisStateStore(RestRedis(url, token), namespace=state_namespace(namespace))
+            return RedisStateStore(RestRedis(url, token), namespace=state_namespace())
     return None
